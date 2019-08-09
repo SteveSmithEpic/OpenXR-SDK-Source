@@ -15,6 +15,7 @@
 // limitations under the License.
 //
 // Author: Mark Young <marky@lunarg.com>
+// Author: Dave Houlton <daveh@lunarg.com>
 //
 
 #include <iostream>
@@ -60,8 +61,7 @@ void TestEnumLayers(uint32_t& total, uint32_t& passed, uint32_t& skipped, uint32
     try {
         XrResult test_result = XR_SUCCESS;
         uint32_t num_before_explicit = 0;
-        const uint32_t num_expected_valid_jsons = 6;
-        std::vector<XrApiLayerProperties> properties;
+        std::vector<XrApiLayerProperties> layer_props;
 
 #if FILTER_OUT_LOADER_ERRORS == 1
         // Re-direct std::cerr to a string since we're intentionally causing errors and we don't
@@ -71,103 +71,132 @@ void TestEnumLayers(uint32_t& total, uint32_t& passed, uint32_t& skipped, uint32
 #endif
 
         std::cout << "    Starting TestEnumLayers" << std::endl;
-        ;
 
-        for (uint32_t test = 0; test < 2; ++test) {
-            uint32_t in_layer_value = 0;
-            uint32_t out_layer_value = 0;
-            std::string subtest_name;
+        uint32_t in_layer_value = 0;
+        uint32_t out_layer_value = 0;
+        std::string subtest_name;
 
-            switch (test) {
-                // No Explicit layers set
-                case 0:
-                    subtest_name = "No explicit layers";
-                    // NOTE: Implicit layers will still be present, need to figure out what to do here.
-                    LoaderTestUnsetEnvironmentVariable("XR_ENABLE_API_LAYERS");
-                    LoaderTestUnsetEnvironmentVariable("XR_API_LAYER_PATH");
-                    break;
-                default:
-                    subtest_name = "Simple explicit layers";
-                    LoaderTestSetEnvironmentVariable("XR_API_LAYER_PATH", "resources/layers");
-                    LoaderTestSetEnvironmentVariable("XR_ENABLE_API_LAYERS", "XR_APILAYER_LUNARG_test");
-                    break;
-            }
+        // Tests with no explicit layers set
+        subtest_name = "No explicit layers";
+        // NOTE: Implicit layers will still be present, need to figure out what to do here.
+        LoaderTestUnsetEnvironmentVariable("XR_ENABLE_API_LAYERS");
+        LoaderTestUnsetEnvironmentVariable("XR_API_LAYER_PATH");
 
-            // Test number query
-            local_total++;
-            std::cout << "        " << subtest_name << " layer count check: ";
-            test_result = xrEnumerateApiLayerProperties(in_layer_value, &out_layer_value, nullptr);
-            if (XR_SUCCESS != test_result) {
-                std::cout << "Failed with return " << std::to_string(test_result) << std::endl;
-                local_failed++;
-            } else {
-                if (test > 0 && out_layer_value != num_before_explicit + num_expected_valid_jsons) {
-                    std::cout << "Failed, expected count " << std::to_string(num_before_explicit + num_expected_valid_jsons)
-                              << ", got " << std::to_string(out_layer_value) << std::endl;
-                    local_failed++;
-                } else {
-                    local_passed++;
-                    std::cout << "Passed" << std::endl;
-                }
-            }
+        // Test number query
+        local_total++;
+        std::cout << "        " << subtest_name << " layer count check: ";
+        test_result = xrEnumerateApiLayerProperties(in_layer_value, &out_layer_value, nullptr);
+        if (XR_FAILED(test_result)) {
+            std::cout << "Failed with return " << std::to_string(test_result) << std::endl;
+            local_failed++;
+        } else {
+            local_passed++;
+            std::cout << "Passed" << std::endl;
+        }
 
-            // Try property return
-            in_layer_value = out_layer_value + 1;
+        // If any implicit layers are found, try property return
+        if (out_layer_value > 0) {
+            in_layer_value = out_layer_value;
             out_layer_value = 0;
-            properties.resize(in_layer_value);
+            layer_props.resize(in_layer_value);
+            for (uint32_t prop = 0; prop < in_layer_value; ++prop) {
+                layer_props[prop] = {XR_TYPE_API_LAYER_PROPERTIES, nullptr, 0, 0};
+            }
             local_total++;
             std::cout << "        " << subtest_name << " layer props query: ";
-            test_result = xrEnumerateApiLayerProperties(in_layer_value, &out_layer_value, properties.data());
+            test_result = xrEnumerateApiLayerProperties(in_layer_value, &out_layer_value, layer_props.data());
             if (XR_SUCCESS != test_result) {
                 std::cout << "Failed with return " << std::to_string(test_result) << std::endl;
                 local_failed++;
+            } 
+        }
+        num_before_explicit = out_layer_value;
+
+        // Tests with some explicit layers added
+        in_layer_value = 0;
+        out_layer_value = 0;
+        subtest_name = "Simple explicit layers";
+        uint32_t num_valid_jsons = 6;
+
+        // Point to json directory, contains 6 valid json files
+        LoaderTestSetEnvironmentVariable("XR_API_LAYER_PATH", "resources/layers");
+        //LoaderTestSetEnvironmentVariable("XR_ENABLE_API_LAYERS", "XrApiLayer_test:XrApiLayer_test_good_relative_path");
+
+        // Test number query
+        local_total++;
+        std::cout << "        " << subtest_name << " layer count check: ";
+        test_result = xrEnumerateApiLayerProperties(in_layer_value, &out_layer_value, nullptr);
+        if (XR_FAILED(test_result)) {
+            std::cout << "Failed with return " << std::to_string(test_result) << std::endl;
+            local_failed++;
+        } else {
+            if (out_layer_value != num_before_explicit + num_valid_jsons) {
+                std::cout << "Failed, expected count " << std::to_string(num_before_explicit + num_valid_jsons)
+                            << ", got " << std::to_string(out_layer_value) << std::endl;
+                local_failed++;
             } else {
-                bool found_bad = false;
-                bool found_good_absolute_test = false;
-                bool found_good_relative_test = false;
-                uint16_t expected_major = XR_VERSION_MAJOR(XR_CURRENT_API_VERSION);
-                uint16_t expected_minor = XR_VERSION_MINOR(XR_CURRENT_API_VERSION);
-                for (uint32_t iii = 0; iii < properties.size(); ++iii) {
-                    std::string layer_name = properties[iii].layerName;
-                    if ("XR_APILAYER_LUNARG_test" == layer_name && 1 == properties[iii].layerVersion &&
-                        XR_MAKE_VERSION(expected_major, expected_minor, 0U) == properties[iii].specVersion &&
-                        0 == strcmp(properties[iii].description, "Test_description")) {
-                        found_good_absolute_test = true;
-                    } else if ("XR_APILAYER_LUNARG_test_good_relative_path" == layer_name && 1 == properties[iii].layerVersion &&
-                               XR_MAKE_VERSION(expected_major, expected_minor, 0U) == properties[iii].specVersion &&
-                               0 == strcmp(properties[iii].description, "Test_description")) {
-                        found_good_relative_test = true;
-                    } else if (std::string::npos != layer_name.find("_badjson")) {
-                        std::cout << "Failed, found bad layer " << layer_name << " in list" << std::endl;
-                        found_bad = true;
-                        local_failed++;
-                        break;
-                    }
-                }
-
-                if (test > 0 && (!found_good_absolute_test || !found_good_relative_test)) {
-                    std::cout << "Failed, did not find ";
-                    if (!found_good_absolute_test) {
-                        std::cout << "XR_APILAYER_LUNARG_test";
-                    }
-                    if (!found_good_relative_test) {
-                        if (!found_good_absolute_test) {
-                            std::cout << " or ";
-                        }
-                        std::cout << "XR_APILAYER_LUNARG_test_good_relative_path";
-                    }
-                    std::cout << std::endl;
-                    local_failed++;
-                } else if (!found_bad) {
-                    std::cout << "Passed" << std::endl;
-                    local_passed++;
-                }
-            }
-
-            if (test == 0) {
-                num_before_explicit = out_layer_value;
+                local_passed++;
+                std::cout << "Passed" << std::endl;
             }
         }
+
+        // Try property return
+        in_layer_value = out_layer_value;
+        out_layer_value = 0;
+        layer_props.resize(in_layer_value);
+        for (uint32_t prop = 0; prop < in_layer_value; ++prop) {
+            layer_props[prop] = {XR_TYPE_API_LAYER_PROPERTIES, nullptr, 0, 0};
+        }
+        local_total++;
+        std::cout << "        " << subtest_name << " layer props query: ";
+        test_result = xrEnumerateApiLayerProperties(in_layer_value, &out_layer_value, layer_props.data());
+        if (XR_FAILED(test_result)) {
+            std::cout << "Failed with return " << std::to_string(test_result) << std::endl;
+            local_failed++;
+        } else {
+            bool found_bad = false;
+            bool found_good_absolute_test = false;
+            bool found_good_relative_test = false;
+            uint16_t expected_major = XR_VERSION_MAJOR(XR_CURRENT_API_VERSION);
+            uint16_t expected_minor = XR_VERSION_MINOR(XR_CURRENT_API_VERSION);
+            for (uint32_t iii = 0; iii < out_layer_value; ++iii) {
+                std::string layer_name = layer_props[iii].layerName;
+                if ("XR_APILAYER_test" == layer_name && 1 == layer_props[iii].layerVersion &&
+                    XR_MAKE_VERSION(expected_major, expected_minor, 0U) == layer_props[iii].specVersion &&
+                    0 == strcmp(layer_props[iii].description, "Test_description")) {
+                    found_good_absolute_test = true;
+                } else if ("XR_APILAYER_LUNARG_test_good_relative_path" == layer_name && 1 == layer_props[iii].layerVersion &&
+                            XR_MAKE_VERSION(expected_major, expected_minor, 0U) == layer_props[iii].specVersion &&
+                            0 == strcmp(layer_props[iii].description, "Test_description")) {
+                    found_good_relative_test = true;
+                } else if (std::string::npos != layer_name.find("_badjson")) {
+                    // If we enumerated any other layers (excepting the 'badjson' variants), it's an error
+                    std::cout << "Failed, found unexpected layer " << layer_name << " in list" << std::endl;
+                    found_bad = true;
+                    local_failed++;
+                    break;
+                }
+            }
+
+            if (!found_good_absolute_test || !found_good_relative_test) {
+                std::cout << "Failed, did not find ";
+                if (!found_good_absolute_test) {
+                    std::cout << "XrApiLayer_test";
+                }
+                if (!found_good_relative_test) {
+                    if (!found_good_absolute_test) {
+                        std::cout << " or ";
+                    }
+                    std::cout << "XrApiLayer_test_good_relative_path";
+                }
+                std::cout << std::endl;
+                local_failed++;
+            } else if (!found_bad) {
+                std::cout << "Passed" << std::endl;
+                local_passed++;
+            }
+        }
+
     } catch (...) {
         std::cout << "Exception triggered during test, automatic failure" << std::endl;
         local_failed++;
@@ -241,7 +270,7 @@ void TestEnumInstanceExtensions(uint32_t& total, uint32_t& passed, uint32_t& ski
                 default:
                     subtest_name = "with explicit API layers";
                     LoaderTestSetEnvironmentVariable("XR_API_LAYER_PATH", "resources/layers");
-                    LoaderTestSetEnvironmentVariable("XR_ENABLE_API_LAYERS", "XR_APILAYER_LUNARG_test");
+                    LoaderTestSetEnvironmentVariable("XR_ENABLE_API_LAYERS", "XrApiLayer_test");
                     expected_extension_count = 4;
                     break;
             }
@@ -277,72 +306,61 @@ void TestEnumInstanceExtensions(uint32_t& total, uint32_t& passed, uint32_t& ski
             }
 
             // Test the active runtime, if installed
-            {
-                // This is a "good" runtime, so it should pass with some set of results.
-                LoaderTestUnsetEnvironmentVariable("XR_RUNTIME_JSON");
+            LoaderTestUnsetEnvironmentVariable("XR_RUNTIME_JSON");
 
-                // Query the count (should return 2)
-                in_extension_value = 0;
-                out_extension_value = 0;
-                local_total++;
-                std::cout << "        Active runtime extension enum count query (" << subtest_name << "): ";
-                test_result = xrEnumerateInstanceExtensionProperties(nullptr, in_extension_value, &out_extension_value, nullptr);
-                if (XR_SUCCESS != test_result) {
-                    std::cout << "Failed" << std::endl;
+            // Query the count (should return 2)
+            in_extension_value = 0;
+            out_extension_value = 0;
+            local_total++;
+            std::cout << "        Active runtime extension enum count query (" << subtest_name << "): ";
+            test_result = xrEnumerateInstanceExtensionProperties(nullptr, in_extension_value, &out_extension_value, nullptr);
+            if (XR_SUCCESS != test_result) {
+                std::cout << "Failed" << std::endl;
+                local_failed++;
+            } else {
+                std::cout << "Passed" << std::endl;
+                local_passed++;
+            }
+
+            // Get the properties
+            properties.resize(out_extension_value);
+            for (uint32_t prop = 0; prop < out_extension_value; ++prop) {
+                properties[prop] = { XR_TYPE_EXTENSION_PROPERTIES, nullptr, 0, 0 };
+            }
+            in_extension_value = out_extension_value;
+            out_extension_value = 0;
+            local_total++;
+            std::cout << "        Active runtime extension enum properties query (" << subtest_name << "): ";
+            test_result = xrEnumerateInstanceExtensionProperties(nullptr, in_extension_value, &out_extension_value,
+                                                                    properties.data());
+            if (XR_SUCCESS != test_result) {
+                std::cout << "Failed" << std::endl;
+                local_failed++;
+            } else {
+                bool found_error = false;
+                for (XrExtensionProperties prop : properties)
+                {
+                    // Just check if extension name begins with "XR_"
+                    if (strlen(prop.extensionName) < 4 || 0 != strncmp(prop.extensionName, "XR_", 3))
+                        found_error = true;
+                }
+
+                if (found_error) {
+                    std::cout << "Failed, malformed extension name." << std::endl;
                     local_failed++;
                 } else {
                     std::cout << "Passed" << std::endl;
                     local_passed++;
                 }
-
-                // Get the properties
-                properties.resize(out_extension_value);
-                for (uint32_t prop = 0; prop < out_extension_value; ++prop) {
-                    properties[prop] = { XR_TYPE_EXTENSION_PROPERTIES, nullptr, 0, 0 };
-                }
-                in_extension_value = out_extension_value;
-                out_extension_value = 0;
-                local_total++;
-                std::cout << "        Active runtime extension enum properties query (" << subtest_name << "): ";
-                test_result = xrEnumerateInstanceExtensionProperties(nullptr, in_extension_value, &out_extension_value,
-                                                                        properties.data());
-                if (XR_SUCCESS != test_result) {
-                    std::cout << "Failed" << std::endl;
-                    local_failed++;
-                } else {
-                    bool found_error = false;
-                    for (XrExtensionProperties prop : properties)
-                    {
-                        // Just check if extension name begins with "XR_"
-                        if (strlen(prop.extensionName) < 4 || 0 != strncmp(prop.extensionName, "XR_", 3))
-                            found_error = true;
-                    }
-
-                    if (found_error) {
-                        std::cout << "Failed, malformed extension name." << std::endl;
-                        local_failed++;
-                    } else {
-                        std::cout << "Passed" << std::endl;
-                        local_passed++;
-                    }
-                }
             }
-
-            // With a valid runtime, we need
-            if (0 == valid_runtime_path.size()) {
-                std::cout << "Failed, finding valid runtime" << std::endl;
-                local_total++;
-                local_failed++;
-                continue;
-            }
-            LoaderTestSetEnvironmentVariable("XR_RUNTIME_JSON", valid_runtime_path);
+            
 
             // Try with a garbage layer name
             in_extension_value = 0;
             out_extension_value = 0;
             local_total++;
             std::cout << "        Garbage Layer extension enum count query (" << subtest_name << "): ";
-            test_result = xrEnumerateInstanceExtensionProperties("XR_APILAYER_LUNARG_no_such_layer", in_extension_value,
+            test_result = xrEnumerateInstanceExtensionProperties("XrApiLayer_no_such_layer", in_extension_value,
                                                                  &out_extension_value, nullptr);
             if (XR_ERROR_API_LAYER_NOT_PRESENT != test_result) {
                 std::cout << "Failed" << std::endl;
@@ -357,7 +375,7 @@ void TestEnumInstanceExtensions(uint32_t& total, uint32_t& passed, uint32_t& ski
             out_extension_value = 0;
             local_total++;
             std::cout << "        Valid Layer extension enum count query (" << subtest_name << "): ";
-            test_result = xrEnumerateInstanceExtensionProperties("XR_APILAYER_LUNARG_test", in_extension_value,
+            test_result = xrEnumerateInstanceExtensionProperties("XR_APILAYER_test", in_extension_value,
                                                                  &out_extension_value, nullptr);
             if ((test == 0 && XR_ERROR_API_LAYER_NOT_PRESENT != test_result) || (test == 1 && XR_SUCCESS != test_result)) {
                 std::cout << "Failed" << std::endl;
@@ -455,7 +473,7 @@ DEFINE_TEST(TestCreateDestroyInstance) {
     try {
         XrResult expected_result = XR_SUCCESS;
         char valid_layer_to_enable[] = "XR_APILAYER_LUNARG_api_dump";
-        char invalid_layer_to_enable[] = "XR_APILAYER_LUNARG_invalid_layer_test";
+        char invalid_layer_to_enable[] = "XrApiLayer_invalid_layer_test";
         char invalid_extension_to_enable[] = "XR_KHR_fake_ext1";
         const char* const valid_layer_name_array[1] = {valid_layer_to_enable};
         const char* const invalid_layer_name_array[1] = {invalid_layer_to_enable};
@@ -471,16 +489,13 @@ DEFINE_TEST(TestCreateDestroyInstance) {
         std::string current_path;
         std::string sample_impl_runtime_path;
         std::string layer_path;
-        if (!FileSysUtilsGetCurrentPath(current_path) ||
-            !FileSysUtilsCombinePaths(current_path, "../../impl/openxr_sample_impl.json", sample_impl_runtime_path)) {
-            std::cout << "FAILED to set runtime path!" << std::endl;
-            throw - 1;
-        }
-        if (!FileSysUtilsCombinePaths(current_path, "../../api_layers", layer_path)) {
-            std::cout << "FAILED to set layer path!" << std::endl;
-            throw - 1;
-        }
-        LoaderTestSetEnvironmentVariable("XR_RUNTIME_JSON", sample_impl_runtime_path);
+
+        // Use active runtime
+        LoaderTestUnsetEnvironmentVariable("XR_RUNTIME_JSON");
+
+        // Convert relative test layer path to absolute, set envar
+        FileSysUtilsGetCurrentPath(layer_path);
+        layer_path = layer_path + TEST_DIRECTORY_SYMBOL + ".." + TEST_DIRECTORY_SYMBOL + ".." + TEST_DIRECTORY_SYMBOL + "api_layers";
         LoaderTestSetEnvironmentVariable("XR_API_LAYER_PATH", layer_path);
 
         // Look to see if the runtime supports any extensions, if it does, use the first one in this test.
@@ -493,8 +508,7 @@ DEFINE_TEST(TestCreateDestroyInstance) {
             in_extension_value = out_extension_value;
             properties.resize(out_extension_value);
             for (uint32_t prop = 0; prop < out_extension_value; ++prop) {
-                properties[prop].type = XR_TYPE_EXTENSION_PROPERTIES;
-                properties[prop].next = nullptr;
+                properties[prop] = { XR_TYPE_EXTENSION_PROPERTIES, nullptr, 0, 0 };
             }
             if (XR_SUCCESS ==
                 xrEnumerateInstanceExtensionProperties(nullptr, in_extension_value, &out_extension_value, properties.data())) {

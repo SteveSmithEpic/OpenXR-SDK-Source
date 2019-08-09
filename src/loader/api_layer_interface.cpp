@@ -68,6 +68,17 @@ XrResult ApiLayerInterface::GetApiLayerProperties(const std::string& openxr_comm
     std::vector<std::unique_ptr<ApiLayerManifestFile>> manifest_files;
     uint32_t manifest_count = 0;
 
+    // Validate props struct before proceeding
+    if (0 < incoming_count && nullptr != api_layer_properties) {
+        for (uint32_t i = 0; i < incoming_count; i++) {
+            if (XR_TYPE_API_LAYER_PROPERTIES != api_layer_properties[i].type) {
+                LoaderLogger::LogErrorMessage(openxr_command,
+                                              "VUID-XrApiLayerProperties-type-type: unknown type in api_layer_properties");
+                return XR_ERROR_VALIDATION_FAILURE;
+            }
+        }
+    }
+
     // Find any implicit layers which we may need to report information for.
     XrResult result = ApiLayerManifestFile::FindManifestFiles(MANIFEST_TYPE_IMPLICIT_API_LAYER, manifest_files);
     if (XR_SUCCESS == result) {
@@ -98,11 +109,6 @@ XrResult ApiLayerInterface::GetApiLayerProperties(const std::string& openxr_comm
         uint32_t prop = 0;
         bool properties_valid = true;
         for (; prop < incoming_count && prop < manifest_count; ++prop) {
-            if (XR_TYPE_API_LAYER_PROPERTIES != api_layer_properties[prop].type) {
-                LoaderLogger::LogErrorMessage(openxr_command,
-                                              "VUID-XrApiLayerProperties-type-type: unknown type in api_layer_properties");
-                properties_valid = false;
-            }
             if (nullptr != api_layer_properties[prop].next) {
                 LoaderLogger::LogErrorMessage(openxr_command, "VUID-XrApiLayerProperties-next-next: expected NULL");
                 properties_valid = false;

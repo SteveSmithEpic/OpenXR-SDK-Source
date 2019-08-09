@@ -150,8 +150,33 @@ static LoaderPlatformLibraryHandle LoaderPlatformLibraryOpen(const std::string &
         const DWORD dwAttrib = GetFileAttributesW(pathW.c_str());
         const bool fileExists = (dwAttrib != INVALID_FILE_ATTRIBUTES && !(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
         if (fileExists) {
-            // If that failed, then try loading it with broader search folders.
+            // DLL file was found, but it didn't load. Try some broader search options in case
+            // there was a dependency that wasn't found.
             handle = LoadLibraryExW(pathW.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+        } else {
+            // DLL file was not found. In case it's a relative path, add the override envars to the
+            // search path and try again. Add both runtime and API layer paths, if set
+            DLL_DIRECTORY_COOKIE rt_cookie = 0, api_cookie = 0;
+
+            char *envar_path = PlatformUtilsGetSecureEnv(OPENXR_RUNTIME_JSON_ENV_VAR);
+            if (nullptr != envar_path) {
+                std::wstring rtpW = utf8_to_wide(envar_path);
+                rt_cookie = AddDllDirectory(rtpW.c_str());
+                PlatformUtilsFreeEnv(envar_path);
+            }
+
+            envar_path = PlatformUtilsGetSecureEnv(OPENXR_API_LAYER_PATH_ENV_VAR);
+            if (nullptr != envar_path) {
+                std::wstring rtpW = utf8_to_wide(envar_path);
+                api_cookie = AddDllDirectory(rtpW.c_str());
+                PlatformUtilsFreeEnv(envar_path);
+            }
+
+            handle = LoadLibraryExW(pathW.c_str(), NULL, LOAD_LIBRARY_SEARCH_USER_DIRS);
+
+            // Clean up search path
+            if (rt_cookie) RemoveDllDirectory(rt_cookie);
+            if (api_cookie) RemoveDllDirectory(api_cookie);
         }
     }
 
